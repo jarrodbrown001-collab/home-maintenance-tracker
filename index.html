@@ -9,6 +9,12 @@
 </head>
 <body>
   <div class="shell">
+    <div class="print-only" id="printBlock">
+      <h1 id="printTitle"></h1>
+      <p id="printSub"></p>
+      <p class="print-meta" id="printMeta"></p>
+    </div>
+
     <header class="top">
       <div class="brand-block">
         <p class="eyebrow">Service record</p>
@@ -16,6 +22,10 @@
         <input id="houseAddr" maxlength="80" placeholder="Add an address or lot name" />
       </div>
       <div class="top-actions">
+        <input type="file" id="importFile" accept="application/json,.json" hidden />
+        <button class="btn-ghost" id="importBtn" type="button">Import backup</button>
+        <button class="btn-ghost" id="exportBtn" type="button">Export backup</button>
+        <button class="btn-ghost" id="printBtn" type="button">Print log</button>
         <button class="btn-ghost" id="resetBtn" type="button">Load sample log</button>
         <button class="btn btn-primary" id="newEntryBtn" type="button">+ Log an entry</button>
       </div>
@@ -68,7 +78,7 @@
               <th>Item</th>
               <th>Recurs</th>
               <th style="text-align:right">Cost</th>
-              <th></th>
+              <th class="col-actions"></th>
             </tr>
           </thead>
           <tbody id="logBody"></tbody>
@@ -120,6 +130,14 @@
         <span style="color:var(--ink-muted); font-size:13px;">months</span>
       </div>
       <div class="field">
+        <label for="fldPhoto">Photo or receipt</label>
+        <input id="fldPhoto" type="file" accept="image/*" />
+        <div class="photo-preview-wrap hidden" id="photoPreviewWrap">
+          <img id="photoPreview" alt="Attached photo preview" />
+          <button type="button" class="link-btn" id="removePhotoBtn">Remove photo</button>
+        </div>
+      </div>
+      <div class="field">
         <label for="fldNotes">Notes</label>
         <textarea id="fldNotes" placeholder="Vendor, part numbers, warranty info…"></textarea>
       </div>
@@ -132,6 +150,13 @@
       </div>
     </div>
   </aside>
+
+  <div class="lightbox" id="lightbox" aria-hidden="true">
+    <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Close photo">&times;</button>
+    <img id="lightboxImg" alt="Attached photo" />
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="script.js"></script>
 </body>

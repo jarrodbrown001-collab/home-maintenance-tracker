@@ -19,3 +19,14 @@ or serve the folder with any static host. Data is stored in the browser via
 - Full log with search, filter (system/type), and sort
 - Add / edit / delete entries; recurring maintenance auto-computes its next due date
   from the interval you set
+- Delete is undoable via a toast (6 seconds), instead of a confirmation dialog
+- Attach a photo or receipt to any entry; stored inline as a compressed JPEG
+- Export the whole log as a JSON backup file, and import one back in
+- Print a clean, dashboard-free copy of the full log (`Print log` button)
+
+## Backups
+
+All data lives in the browser's `localStorage`, scoped to this one browser/device —
+there's no server and no sync. Use **Export backup** regularly, and after adding
+photos, since local storage has a size limit (typically 5–10 MB per site). **Import
+backup** replaces the current log with the contents of a previously exported file.

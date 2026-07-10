@@ -22,6 +22,8 @@
   var state = { houseName: "", houseAddress: "", entries: [] };
   var filters = { search: "", system: "", type: "", sort: "date-desc" };
   var editingId = null;
+  var currentPhotoDataUrl = null;
+  var toastTimer = null;
 
   // ---------- persistence ----------
   function load() {
@@ -38,7 +40,11 @@
     return false;
   }
   function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (err) {
+      window.alert("Storage is full — try removing a photo from an entry, or export a backup and trim old entries.");
+    }
   }
 
   // ---------- date helpers ----------
@@ -163,6 +169,14 @@
     renderSystems();
     renderFilterOptions();
     renderTable();
+    renderPrintHeader();
+  }
+
+  function renderPrintHeader() {
+    document.getElementById("printTitle").textContent = state.houseName || "House Log";
+    document.getElementById("printSub").textContent = state.houseAddress || "";
+    document.getElementById("printMeta").textContent =
+      "Printed " + fmtDate(todayISO()) + " · " + state.entries.length + " entries on record";
   }
 
   function renderStats() {
@@ -301,10 +315,15 @@
     body.innerHTML = rows.map(function (e) {
       var sys = SYS_BY_ID[e.system];
       var recur = e.recurring ? ('every ' + e.intervalMonths + ' mo · next ' + fmtDateShort(e.nextDue)) : "—";
+      var photoChip = e.photo
+        ? '<button type="button" class="photo-chip" data-photo="' + e.id + '" aria-label="View attached photo">' +
+          '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.1" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>' +
+          '</button>'
+        : '';
       return '<tr>' +
         '<td class="col-date">' + fmtDate(e.date) + '</td>' +
         '<td>' + (sys ? sys.name : e.system) + '</td>' +
-        '<td><div class="item-title">' + escapeHtml(e.title) + '</div>' +
+        '<td><div class="item-title-row"><span class="item-title">' + escapeHtml(e.title) + '</span>' + photoChip + '</div>' +
           '<span class="type-chip">' + TYPE_LABEL[e.type] + '</span>' +
           (e.notes ? '<div class="item-notes">' + escapeHtml(e.notes) + '</div>' : '') + '</td>' +
         '<td class="recur-note">' + recur + '</td>' +
@@ -319,15 +338,43 @@
       b.addEventListener("click", function () { openPanel(b.getAttribute("data-edit")); });
     });
     body.querySelectorAll("[data-del]").forEach(function (b) {
+      b.addEventListener("click", function () { deleteEntry(b.getAttribute("data-del")); });
+    });
+    body.querySelectorAll("[data-photo]").forEach(function (b) {
       b.addEventListener("click", function () {
-        var id = b.getAttribute("data-del");
-        var e = state.entries.find(function (x) { return x.id === id; });
-        if (e && window.confirm('Delete "' + e.title + '"? This can\'t be undone.')) {
-          state.entries = state.entries.filter(function (x) { return x.id !== id; });
-          save(); renderAll();
-        }
+        var e = state.entries.find(function (x) { return x.id === b.getAttribute("data-photo"); });
+        if (e && e.photo) openLightbox(e.photo);
       });
     });
+  }
+
+  // ---------- delete with undo ----------
+  function deleteEntry(id) {
+    var idx = state.entries.findIndex(function (x) { return x.id === id; });
+    if (idx === -1) return;
+    var removed = state.entries[idx];
+    var atIndex = idx;
+    state.entries.splice(idx, 1);
+    save();
+    renderAll();
+    showUndoToast('Deleted "' + removed.title + '"', function () {
+      state.entries.splice(atIndex, 0, removed);
+      save();
+      renderAll();
+    });
+  }
+
+  function showUndoToast(message, onUndo) {
+    clearTimeout(toastTimer);
+    var toast = document.getElementById("toast");
+    toast.innerHTML = "<span>" + escapeHtml(message) + '</span><button type="button" class="toast-undo" id="toastUndoBtn">Undo</button>';
+    toast.classList.add("show");
+    document.getElementById("toastUndoBtn").addEventListener("click", function () {
+      clearTimeout(toastTimer);
+      toast.classList.remove("show");
+      onUndo();
+    });
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 6000);
   }
 
   function escapeHtml(s) {
@@ -346,6 +393,8 @@
     document.getElementById("panelTitle").textContent = editingId ? "Edit entry" : "Log an entry";
     document.getElementById("deleteEntryBtn").style.display = editingId ? "inline-block" : "none";
 
+    document.getElementById("fldPhoto").value = "";
+
     if (editingId) {
       var e = state.entries.find(function (x) { return x.id === editingId; });
       document.getElementById("fldTitle").value = e.title;
@@ -356,6 +405,7 @@
       document.getElementById("fldNotes").value = e.notes || "";
       document.getElementById("fldRecurs").checked = !!e.recurring;
       document.getElementById("fldInterval").value = e.intervalMonths || "";
+      currentPhotoDataUrl = e.photo || null;
     } else {
       document.getElementById("fldTitle").value = prefill && prefill.title ? prefill.title : "";
       document.getElementById("fldSystem").value = prefill && prefill.system ? prefill.system : SYSTEMS[0].id;
@@ -365,7 +415,9 @@
       document.getElementById("fldNotes").value = "";
       document.getElementById("fldRecurs").checked = !!(prefill && prefill.interval);
       document.getElementById("fldInterval").value = prefill && prefill.interval ? prefill.interval : "";
+      currentPhotoDataUrl = null;
     }
+    syncPhotoPreview();
     syncRecurVisibility();
     overlay.classList.add("open");
     panel.classList.add("open");
@@ -386,12 +438,75 @@
     if (!isMaint) document.getElementById("fldRecurs").checked = false;
   }
 
+  // ---------- photo attach ----------
+  function syncPhotoPreview() {
+    var wrap = document.getElementById("photoPreviewWrap");
+    if (currentPhotoDataUrl) {
+      document.getElementById("photoPreview").src = currentPhotoDataUrl;
+      wrap.classList.remove("hidden");
+    } else {
+      document.getElementById("photoPreview").src = "";
+      wrap.classList.add("hidden");
+    }
+  }
+
+  function readAndCompressImage(file, maxDim, quality, callback) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        var w = Math.round(img.width * scale);
+        var h = Math.round(img.height * scale);
+        var canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        callback(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  document.getElementById("fldPhoto").addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    readAndCompressImage(file, 900, 0.72, function (dataUrl) {
+      currentPhotoDataUrl = dataUrl;
+      syncPhotoPreview();
+    });
+  });
+  document.getElementById("removePhotoBtn").addEventListener("click", function () {
+    currentPhotoDataUrl = null;
+    document.getElementById("fldPhoto").value = "";
+    syncPhotoPreview();
+  });
+
+  // ---------- lightbox ----------
+  var lightbox = document.getElementById("lightbox");
+  function openLightbox(url) {
+    document.getElementById("lightboxImg").src = url;
+    lightbox.classList.add("open");
+    lightbox.setAttribute("aria-hidden", "false");
+  }
+  function closeLightbox() {
+    lightbox.classList.remove("open");
+    lightbox.setAttribute("aria-hidden", "true");
+    document.getElementById("lightboxImg").src = "";
+  }
+  document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
+  lightbox.addEventListener("click", function (e) { if (e.target === lightbox) closeLightbox(); });
+
   document.getElementById("fldType").addEventListener("change", syncRecurVisibility);
   document.getElementById("newEntryBtn").addEventListener("click", function () { openPanel(null); });
   document.getElementById("panelClose").addEventListener("click", closePanel);
   document.getElementById("cancelBtn").addEventListener("click", closePanel);
   overlay.addEventListener("click", closePanel);
-  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && panel.classList.contains("open")) closePanel(); });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Escape") return;
+    if (lightbox.classList.contains("open")) closeLightbox();
+    else if (panel.classList.contains("open")) closePanel();
+  });
 
   document.getElementById("saveBtn").addEventListener("click", function () {
     var title = document.getElementById("fldTitle").value.trim();
@@ -411,7 +526,8 @@
       cost: document.getElementById("fldCost").value === "" ? null : Number(document.getElementById("fldCost").value),
       notes: document.getElementById("fldNotes").value.trim(),
       recurring: recurring,
-      intervalMonths: recurring ? interval : null
+      intervalMonths: recurring ? interval : null,
+      photo: currentPhotoDataUrl || null
     };
     payload.nextDue = recurring ? addMonths(date, interval) : null;
 
@@ -429,19 +545,57 @@
 
   document.getElementById("deleteEntryBtn").addEventListener("click", function () {
     if (!editingId) return;
-    var e = state.entries.find(function (x) { return x.id === editingId; });
-    if (window.confirm('Delete "' + e.title + '"? This can\'t be undone.')) {
-      state.entries = state.entries.filter(function (x) { return x.id !== editingId; });
-      save();
-      closePanel();
-      renderAll();
-    }
+    var id = editingId;
+    closePanel();
+    deleteEntry(id);
   });
 
   // ---------- header + filters wiring ----------
   document.getElementById("houseName").addEventListener("input", function (e) { state.houseName = e.target.value; save(); });
   document.getElementById("houseAddr").addEventListener("input", function (e) { state.houseAddress = e.target.value; save(); });
   document.getElementById("resetBtn").addEventListener("click", loadSample);
+  document.getElementById("printBtn").addEventListener("click", function () { window.print(); });
+
+  document.getElementById("exportBtn").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var base = (state.houseName || "house-log").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "house-log";
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = base + "-backup-" + todayISO() + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("importBtn").addEventListener("click", function () {
+    document.getElementById("importFile").click();
+  });
+  document.getElementById("importFile").addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var parsed;
+      try {
+        parsed = JSON.parse(ev.target.result);
+        if (!parsed || !Array.isArray(parsed.entries)) throw new Error("bad shape");
+      } catch (err) {
+        window.alert("That file doesn't look like a House Log backup.");
+        return;
+      }
+      var msg = "Import will replace the current log (" + state.entries.length + " entries) with this backup (" + parsed.entries.length + " entries). Continue?";
+      if (!window.confirm(msg)) return;
+      state.houseName = parsed.houseName || "";
+      state.houseAddress = parsed.houseAddress || "";
+      state.entries = parsed.entries;
+      save();
+      renderAll();
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
   document.getElementById("fSearch").addEventListener("input", function (e) { filters.search = e.target.value; renderTable(); });
   document.getElementById("fSystem").addEventListener("change", function (e) { filters.system = e.target.value; renderTable(); });
   document.getElementById("fType").addEventListener("change", function (e) { filters.type = e.target.value; renderTable(); });
