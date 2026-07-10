@@ -1,13 +1,15 @@
 # Home Maintenance Tracker
 
+**Live app:** https://jarrodbrown001-collab.github.io/home-maintenance-tracker/
+
 A home maintenance logbook, structured the way a vehicle service record is: recurring
 maintenance items, one-off repairs, upgrades, and renovations, all tracked by house
 system (roof, HVAC, plumbing, electrical, exterior, windows & doors, appliances,
 interior & safety, yard & grounds).
 
-Single-file static app — open `index.html` directly, or serve it with any static
-host. Data is stored in the browser via `localStorage`, seeded with sample entries
-on first load.
+Static site (`index.html` / `style.css` / `script.js`) — open `index.html` directly,
+or serve the folder with any static host. Data is stored in the browser via
+`localStorage`, seeded with sample entries on first load.
 
 ## Features
 
