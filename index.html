@@ -29,6 +29,7 @@
         <button class="btn-ghost" id="exportBtn" type="button">Export backup</button>
         <button class="btn-ghost" id="printBtn" type="button">Print log</button>
         <button class="btn-ghost" id="resetBtn" type="button">Load sample log</button>
+        <button class="btn-ghost cart-btn" id="cartBtn" type="button">Cart<span class="cart-count hidden" id="cartCount">0</span></button>
         <button class="btn btn-primary" id="newEntryBtn" type="button">+ Log an entry</button>
       </div>
     </header>
@@ -61,6 +62,12 @@
       <h2 class="section-title">The house, by system</h2>
       <p class="section-desc">Next scheduled service for each part of the property — click any card to open it.</p>
       <div class="systems-grid" id="systemsGrid"></div>
+    </section>
+
+    <section id="projectsSection" class="no-print">
+      <h2 class="section-title">DIY projects &amp; shopping</h2>
+      <p class="section-desc">A common job for each system. Click an item to add it to your cart, or jump straight to a video walkthrough.</p>
+      <div class="projects-grid" id="projectsGrid"></div>
     </section>
 
     <section>
@@ -165,6 +172,21 @@
       <div style="display:flex; gap:8px; margin-left:auto;">
         <button class="btn" id="cancelBtn" type="button">Cancel</button>
         <button class="btn btn-primary" id="saveBtn" type="button">Save entry</button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="overlay" id="cartOverlay"></div>
+  <aside class="panel" id="cartPanel" aria-hidden="true">
+    <div class="panel-head">
+      <h2>Shopping cart</h2>
+      <button class="panel-close" id="cartPanelClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="panel-body" id="cartBody"></div>
+    <div class="panel-foot">
+      <button class="icon-btn danger" id="clearCartBtn" type="button">Clear cart</button>
+      <div style="display:flex; gap:8px; margin-left:auto;">
+        <button class="btn btn-primary" id="cartCloseBtn" type="button">Done</button>
       </div>
     </div>
   </aside>

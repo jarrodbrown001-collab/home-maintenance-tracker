@@ -18,7 +18,23 @@
 
   var TYPE_LABEL = { maintenance: "Maintenance", repair: "Repair", upgrade: "Upgrade", renovation: "Renovation" };
 
-  var state = { activePropertyId: null, properties: [], lastExportAt: null, lastImport: null };
+  var PROJECT_CATALOG = {
+    roof: { title: "Clean the gutters", blurb: "Twice-a-year job before they clog and back up onto the fascia.", video: "how to clean gutters DIY", items: ["Gutter scoop", "Extendable ladder", "Work gloves", "Garden hose spray nozzle"] },
+    hvac: { title: "Replace the furnace filter", blurb: "A 5-minute job that keeps the system from overworking.", video: "how to replace a furnace filter", items: ["1-inch pleated furnace filter", "Work light"] },
+    plumbing: { title: "Flush the water heater", blurb: "Clears sediment buildup that shortens the tank's life.", video: "how to flush a water heater", items: ["Garden hose", "5-gallon bucket", "Sediment flush kit"] },
+    electrical: { title: "Replace a GFCI outlet", blurb: "Common near sinks and outdoors — straightforward with the power off.", video: "how to replace a GFCI outlet", items: ["GFCI outlet", "Non-contact voltage tester", "Wire strippers", "Screwdriver set"] },
+    exterior: { title: "Seal driveway cracks", blurb: "Keeps water out before freeze-thaw cycles widen the cracks.", video: "how to seal driveway cracks", items: ["Driveway crack filler", "Caulking gun", "Wire brush"] },
+    windows: { title: "Re-caulk exterior windows", blurb: "Stops drafts and water intrusion around the frame.", video: "how to caulk windows exterior", items: ["Exterior-grade caulk", "Caulking gun", "Caulk removal tool"] },
+    appliances: { title: "Clean the dryer vent", blurb: "A blocked vent is a real fire risk — worth doing yearly.", video: "how to clean a dryer vent", items: ["Dryer vent cleaning kit", "Shop vacuum with hose attachment"] },
+    safety: { title: "Test smoke & CO detectors", blurb: "Press-test and swap batteries on the same day, twice a year.", video: "how to test smoke detectors", items: ["9V batteries", "Smoke detector tester spray"] },
+    grounds: { title: "Winterize the sprinklers", blurb: "Blow out the lines before the first freeze to prevent burst pipes.", video: "how to winterize a sprinkler system", items: ["Air compressor", "Blow-out adapter fitting"] }
+  };
+
+  function youtubeSearchUrl(q) { return "https://www.youtube.com/results?search_query=" + encodeURIComponent(q); }
+  function amazonSearchUrl(q) { return "https://www.amazon.com/s?k=" + encodeURIComponent(q); }
+  function homeDepotSearchUrl(q) { return "https://www.homedepot.com/s/" + encodeURIComponent(q); }
+
+  var state = { activePropertyId: null, properties: [], lastExportAt: null, lastImport: null, cart: [] };
   var filters = { search: "", system: "", type: "", sort: "date-desc" };
   var editingId = null;
   var currentPhotoDataUrl = null;
@@ -56,6 +72,7 @@
           ? parsed.activePropertyId : parsed.properties[0].id;
         state.lastExportAt = parsed.lastExportAt || null;
         state.lastImport = parsed.lastImport || null;
+        state.cart = Array.isArray(parsed.cart) ? parsed.cart : [];
         return true;
       }
       if (parsed && Array.isArray(parsed.entries)) {
@@ -64,6 +81,7 @@
         state.activePropertyId = p.id;
         state.lastExportAt = null;
         state.lastImport = null;
+        state.cart = [];
         return true;
       }
     } catch (e) {}
@@ -226,6 +244,8 @@
     renderStats(scoped ? currentSystemId : null);
     if (!scoped) renderChart();
     renderSystems();
+    renderProjects(scoped ? currentSystemId : null);
+    renderCartBadge();
     renderFilterOptions();
     renderTable();
     renderPrintHeader();
@@ -419,9 +439,15 @@
         dueHtml = "";
       }
       var extra = actives.length > 1 ? '<span class="track-count">+' + (actives.length - 1) + ' more tracked</span>' : '<span class="track-count"></span>';
+      var diyHtml = PROJECT_CATALOG[s.id]
+        ? '<a class="diy-link" href="' + youtubeSearchUrl(PROJECT_CATALOG[s.id].video) + '" target="_blank" rel="noopener">' +
+          '<svg viewBox="0 0 24 24"><path d="M4 8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 9.5v5l4.5-2.5Z" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>' +
+          'DIY guide</a>'
+        : "";
       return '<div class="system-card" data-system-nav="' + s.id + '">' +
         '<div class="head"><svg viewBox="0 0 24 24">' + s.icon + '</svg><span class="sys-name">' + escapeHtml(s.name) + '</span>' + pillHtml + '</div>' +
         '<div class="next-item">' + itemHtml + dueHtml + '</div>' +
+        diyHtml +
         '<div class="foot">' + extra + '<button type="button" class="link-btn" data-quick-system="' + s.id + '" data-quick-title="' + (top ? top.entry.title.replace(/"/g, "&quot;") : "") + '" data-quick-interval="' + (top ? top.entry.intervalMonths : "") + '">Log service &rarr;</button></div>' +
         '</div>';
     }).join("") + '<button type="button" class="system-card add-system-tile" id="addSystemTile"><span class="add-plus">+</span><span>Add a system</span></button>';
@@ -431,7 +457,7 @@
 
     grid.querySelectorAll(".system-card[data-system-nav]").forEach(function (card) {
       card.addEventListener("click", function (e) {
-        if (e.target.closest(".link-btn")) return;
+        if (e.target.closest(".link-btn, .diy-link")) return;
         location.hash = "#system/" + encodeURIComponent(card.getAttribute("data-system-nav"));
       });
     });
@@ -452,6 +478,76 @@
         save();
         renderAll();
       });
+    });
+  }
+
+  // ---------- DIY projects & shopping cart ----------
+  function renderProjects(scopeSystemId) {
+    var systems = effectiveSystems();
+    var ids = scopeSystemId ? [scopeSystemId] : systems.map(function (s) { return s.id; });
+    var cardsHtml = "";
+    ids.forEach(function (id) {
+      var catalog = PROJECT_CATALOG[id];
+      if (!catalog) return;
+      var sys = sysById(id);
+      var sysName = sys ? sys.name : id;
+      var itemsHtml = catalog.items.map(function (item) {
+        var inCart = state.cart.indexOf(item) !== -1;
+        return '<button type="button" class="project-item' + (inCart ? " in-cart" : "") + '" data-cart-item="' + escapeHtml(item) + '">' + escapeHtml(item) + '</button>';
+      }).join("");
+      cardsHtml += '<div class="project-card">' +
+        '<p class="eyebrow">' + escapeHtml(sysName) + '</p>' +
+        '<h3>' + escapeHtml(catalog.title) + '</h3>' +
+        '<p class="blurb">' + escapeHtml(catalog.blurb) + '</p>' +
+        '<div class="project-items">' + itemsHtml + '</div>' +
+        '<div class="foot">' +
+        '<a class="diy-link" href="' + youtubeSearchUrl(catalog.video) + '" target="_blank" rel="noopener">' +
+        '<svg viewBox="0 0 24 24"><path d="M4 8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 9.5v5l4.5-2.5Z" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>' +
+        'Watch a DIY guide</a>' +
+        '</div></div>';
+    });
+
+    var grid = document.getElementById("projectsGrid");
+    grid.innerHTML = cardsHtml || '<p class="chart-empty">No DIY project on file for this system yet.</p>';
+    grid.querySelectorAll("[data-cart-item]").forEach(function (btn) {
+      btn.addEventListener("click", function () { toggleCartItem(btn.getAttribute("data-cart-item")); });
+    });
+  }
+
+  function toggleCartItem(item) {
+    var idx = state.cart.indexOf(item);
+    if (idx === -1) state.cart.push(item);
+    else state.cart.splice(idx, 1);
+    save();
+    renderProjects(currentSystemId || null);
+    renderCartBadge();
+    renderCartPanel();
+  }
+
+  function renderCartBadge() {
+    var badge = document.getElementById("cartCount");
+    badge.textContent = state.cart.length;
+    badge.classList.toggle("hidden", state.cart.length === 0);
+  }
+
+  function renderCartPanel() {
+    var body = document.getElementById("cartBody");
+    if (!state.cart.length) {
+      body.innerHTML = '<p class="cart-empty">Your cart is empty. Click an item on a DIY project card to add it here.</p>';
+      return;
+    }
+    body.innerHTML = state.cart.map(function (item) {
+      return '<div class="cart-row">' +
+        '<span class="cart-item-name">' + escapeHtml(item) + '</span>' +
+        '<div class="cart-shop-links">' +
+        '<a href="' + amazonSearchUrl(item) + '" target="_blank" rel="noopener">Amazon</a>' +
+        '<a href="' + homeDepotSearchUrl(item) + '" target="_blank" rel="noopener">Home Depot</a>' +
+        '</div>' +
+        '<button type="button" class="icon-btn danger" data-cart-remove="' + escapeHtml(item) + '">Remove</button>' +
+        '</div>';
+    }).join("");
+    body.querySelectorAll("[data-cart-remove]").forEach(function (btn) {
+      btn.addEventListener("click", function () { toggleCartItem(btn.getAttribute("data-cart-remove")); });
     });
   }
 
@@ -499,10 +595,15 @@
           '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.1" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>' +
           '</button>'
         : '';
+      var guideChip = (e.type === "maintenance" || e.type === "repair")
+        ? '<a class="diy-link" href="' + youtubeSearchUrl(e.title + " " + (sys ? sys.name : "") + " how to") + '" target="_blank" rel="noopener" aria-label="Search a DIY guide for ' + escapeHtml(e.title) + '">' +
+          '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M4 8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 9.5v5l4.5-2.5Z" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>' +
+          '</a>'
+        : '';
       return '<tr>' +
         '<td class="col-date">' + fmtDate(e.date) + '</td>' +
         '<td>' + (sys ? escapeHtml(sys.name) : e.system) + '</td>' +
-        '<td><div class="item-title-row"><span class="item-title">' + escapeHtml(e.title) + '</span>' + photoChip + '</div>' +
+        '<td><div class="item-title-row"><span class="item-title">' + escapeHtml(e.title) + '</span>' + photoChip + guideChip + '</div>' +
           '<span class="type-chip">' + TYPE_LABEL[e.type] + '</span>' +
           (e.notes ? '<div class="item-notes">' + escapeHtml(e.notes) + '</div>' : '') + '</td>' +
         '<td class="recur-note">' + recur + '</td>' +
@@ -682,6 +783,34 @@
   document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
   lightbox.addEventListener("click", function (e) { if (e.target === lightbox) closeLightbox(); });
 
+  // ---------- cart panel ----------
+  var cartOverlay = document.getElementById("cartOverlay");
+  var cartPanel = document.getElementById("cartPanel");
+  function openCartPanel() {
+    renderCartPanel();
+    cartOverlay.classList.add("open");
+    cartPanel.classList.add("open");
+    cartPanel.setAttribute("aria-hidden", "false");
+  }
+  function closeCartPanel() {
+    cartOverlay.classList.remove("open");
+    cartPanel.classList.remove("open");
+    cartPanel.setAttribute("aria-hidden", "true");
+  }
+  document.getElementById("cartBtn").addEventListener("click", openCartPanel);
+  document.getElementById("cartPanelClose").addEventListener("click", closeCartPanel);
+  document.getElementById("cartCloseBtn").addEventListener("click", closeCartPanel);
+  cartOverlay.addEventListener("click", closeCartPanel);
+  document.getElementById("clearCartBtn").addEventListener("click", function () {
+    if (!state.cart.length) return;
+    if (!window.confirm("Clear all " + state.cart.length + " item(s) from your cart?")) return;
+    state.cart = [];
+    save();
+    renderCartBadge();
+    renderCartPanel();
+    renderProjects(currentSystemId || null);
+  });
+
   // ---------- generic prompt modal (add property / add system) ----------
   var promptOverlay = document.getElementById("promptOverlay");
   var promptModal = document.getElementById("promptModal");
@@ -728,6 +857,7 @@
     if (ev.key !== "Escape") return;
     if (lightbox.classList.contains("open")) closeLightbox();
     else if (promptModal.classList.contains("open")) closePrompt();
+    else if (cartPanel.classList.contains("open")) closeCartPanel();
     else if (panel.classList.contains("open")) closePanel();
   });
 
