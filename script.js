@@ -103,11 +103,6 @@
     var d = new Date(parts[0], parts[1] - 1, parts[2]);
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
-  function fmtDateShort(iso) {
-    var parts = iso.split("-").map(Number);
-    var d = new Date(parts[0], parts[1] - 1, parts[2]);
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
   function fmtDateTime(stamp) {
     var d = new Date(stamp);
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) +
@@ -357,24 +352,50 @@
       if (new Date(e.date + "T00:00:00").getFullYear() !== yearNow) return;
       totals[e.system] = (totals[e.system] || 0) + (Number(e.cost) || 0);
     });
-    var rows = effectiveSystems().map(function (s) { return { name: s.name, val: totals[s.id] || 0 }; })
+    var rows = effectiveSystems().map(function (s) { return { id: s.id, name: s.name, icon: s.icon, val: totals[s.id] || 0 }; })
       .filter(function (r) { return r.val > 0; })
       .sort(function (a, b) { return b.val - a.val; });
 
     var el = document.getElementById("chartCard");
+    var tooltip = document.getElementById("chartTooltip");
+    tooltip.classList.remove("show");
     if (!rows.length) {
       el.innerHTML = '<p class="chart-empty">No spend logged for ' + yearNow + ' yet.</p>';
       return;
     }
     var max = rows[0].val;
-    el.innerHTML = rows.map(function (r) {
+    el.innerHTML = rows.map(function (r, i) {
       var pct = Math.max(4, Math.round((r.val / max) * 100));
-      return '<div class="bar-row">' +
-        '<div class="bar-label" title="' + r.name + '">' + r.name + '</div>' +
-        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      return '<div class="bar-row" data-chart-row tabindex="0" data-name="' + escapeHtml(r.name) + '" data-value="' + fmtMoney(r.val) + '">' +
+        '<svg class="bar-icon" viewBox="0 0 24 24">' + r.icon + '</svg>' +
+        '<div class="bar-label" title="' + escapeHtml(r.name) + '">' + escapeHtml(r.name) + '</div>' +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%; animation-delay:' + (i * 40) + 'ms"></div></div>' +
         '<div class="bar-value">' + fmtMoney(r.val) + '</div>' +
         '</div>';
     }).join("");
+
+    el.querySelectorAll("[data-chart-row]").forEach(function (row) {
+      row.addEventListener("mouseenter", function () { showChartTooltip(row); });
+      row.addEventListener("mousemove", function () { positionChartTooltip(row); });
+      row.addEventListener("mouseleave", function () { tooltip.classList.remove("show"); });
+      row.addEventListener("focus", function () { showChartTooltip(row); });
+      row.addEventListener("blur", function () { tooltip.classList.remove("show"); });
+    });
+  }
+
+  function showChartTooltip(row) {
+    var tooltip = document.getElementById("chartTooltip");
+    tooltip.innerHTML = '<span class="ct-value">' + escapeHtml(row.getAttribute("data-value")) + '</span><span class="ct-name">' + escapeHtml(row.getAttribute("data-name")) + '</span>';
+    tooltip.classList.add("show");
+    positionChartTooltip(row);
+  }
+  function positionChartTooltip(row) {
+    var tooltip = document.getElementById("chartTooltip");
+    var wrap = document.getElementById("chartCardWrap");
+    var rowRect = row.getBoundingClientRect();
+    var wrapRect = wrap.getBoundingClientRect();
+    tooltip.style.left = (rowRect.left - wrapRect.left + rowRect.width / 2) + "px";
+    tooltip.style.top = (rowRect.top - wrapRect.top) + "px";
   }
 
   function renderSystems() {
@@ -391,7 +412,7 @@
           : top.status === "soon" ? "due soon" : "on track";
         pillHtml = '<span class="pill ' + toneClass + '">' + toneText + '</span>';
         itemHtml = top.entry.title;
-        dueHtml = '<div class="next-due-date">Next due ' + fmtDateShort(top.entry.nextDue) + '</div>';
+        dueHtml = '<div class="next-due-date">Next due ' + fmtDate(top.entry.nextDue) + '</div>';
       } else {
         pillHtml = '<span class="pill tone-none">unscheduled</span>';
         itemHtml = '<span class="muted">No recurring maintenance logged yet</span>';
@@ -472,7 +493,7 @@
     }
     body.innerHTML = rows.map(function (e) {
       var sys = sysById(e.system);
-      var recur = e.recurring ? ('every ' + e.intervalMonths + ' mo · next ' + fmtDateShort(e.nextDue)) : "—";
+      var recur = e.recurring ? ('every ' + e.intervalMonths + ' mo · next ' + fmtDate(e.nextDue)) : "—";
       var photoChip = e.photo
         ? '<button type="button" class="photo-chip" data-photo="' + e.id + '" aria-label="View attached photo">' +
           '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.1" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>' +
