@@ -112,6 +112,40 @@ button { cursor: pointer; }
 }
 
 .shell { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+.hidden { display: none !important; }
+
+/* ---------- Property tabs ---------- */
+.property-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.property-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev);
+  color: var(--ink-muted);
+}
+.property-tab:hover { border-color: var(--accent-soft-line); color: var(--ink); }
+.property-tab.active { background: var(--accent-soft); border-color: var(--accent-soft-line); color: var(--accent-ink); }
+.property-tab.add { border-style: dashed; color: var(--accent); font-weight: 700; }
+.property-tab.add:hover { background: var(--accent-soft); }
+.pt-remove { opacity: 0.55; font-size: 13px; line-height: 1; }
+.pt-remove:hover { opacity: 1; color: var(--critical); }
+
+/* ---------- Backup status ---------- */
+.backup-status { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: -8px 0 24px; }
+.status-chip { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); }
+.status-chip.warn { color: var(--warn); }
+
+/* ---------- System banner (single-system view) ---------- */
+.system-banner { margin-bottom: 26px; }
+.system-banner-head { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.system-banner-head svg { width: 34px; height: 34px; color: var(--accent); flex-shrink: 0; }
+.system-banner-head h1 { font-family: var(--font-display); font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.system-banner-head p { margin: 3px 0 0; color: var(--ink-muted); font-size: 13px; }
 
 /* ---------- Header ---------- */
 header.top {
@@ -291,6 +325,24 @@ header.top {
   flex-direction: column;
   gap: 10px;
 }
+.system-card[data-system-nav] { cursor: pointer; transition: border-color 0.14s ease, box-shadow 0.14s ease; }
+.system-card[data-system-nav]:hover { border-color: var(--accent-soft-line); box-shadow: var(--shadow); }
+.add-system-tile {
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-style: dashed;
+  color: var(--ink-faint);
+  cursor: pointer;
+  min-height: 128px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color 0.14s ease, color 0.14s ease;
+}
+.add-system-tile:hover { border-color: var(--accent); color: var(--accent); }
+.add-system-tile .add-plus { font-size: 24px; font-weight: 300; line-height: 1; }
 .system-card .head {
   display: flex;
   align-items: center;
@@ -541,6 +593,37 @@ td.col-actions { text-align: right; white-space: nowrap; }
 }
 .req { color: var(--critical); }
 
+/* ---------- Mini modal (add property / add system) ---------- */
+.mini-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -46%);
+  width: min(360px, calc(100vw - 32px));
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  z-index: 52;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.mini-modal.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%); }
+.mini-modal h3 { font-family: var(--font-display); font-size: 17px; font-weight: 700; margin: 0 0 14px; }
+.mini-modal input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  padding: 9px 10px;
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 16px;
+}
+.mini-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* ---------- Lightbox ---------- */
 .lightbox {
   position: fixed; inset: 0;
@@ -613,9 +696,10 @@ td.col-actions { text-align: right; white-space: nowrap; }
   }
   body { background: #fff; }
   .shell { max-width: 100%; padding: 0; }
-  header.top, .stats, .chart-card, .systems-grid,
-  .filters, .overlay, .panel, .lightbox, .toast,
-  .col-actions, .photo-chip {
+  header.top, .stats, #chartSection, #systemsSection,
+  .property-tabs, .backup-status, .system-banner,
+  .filters, .overlay, .panel, .lightbox, .toast, .mini-modal,
+  .col-actions, .photo-chip, .no-print {
     display: none !important;
   }
   .print-only {

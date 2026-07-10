@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>House Log</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="A home maintenance logbook — recurring maintenance, repairs, upgrades, and renovations tracked by house system." />
+  <meta name="description" content="A home maintenance logbook — recurring maintenance, repairs, upgrades, and renovations tracked by house system, across as many properties as you own." />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,6 +14,8 @@
       <p id="printSub"></p>
       <p class="print-meta" id="printMeta"></p>
     </div>
+
+    <nav class="property-tabs no-print" id="propertyTabs" aria-label="Properties"></nav>
 
     <header class="top">
       <div class="brand-block">
@@ -31,17 +33,30 @@
       </div>
     </header>
 
+    <div class="backup-status no-print" id="backupStatus"></div>
+
+    <div class="system-banner hidden no-print" id="systemBanner">
+      <button type="button" class="link-btn" id="backToOverview">&larr; All systems</button>
+      <div class="system-banner-head">
+        <span id="bannerIcon"></span>
+        <div>
+          <h1 id="bannerName"></h1>
+          <p id="bannerSub"></p>
+        </div>
+      </div>
+    </div>
+
     <section class="stats" id="statRow" aria-label="Summary"></section>
 
-    <section>
+    <section id="chartSection">
       <h2 class="section-title">Spend by system, this year</h2>
       <p class="section-desc">Where the year's maintenance, repair, and project dollars went.</p>
       <div class="chart-card" id="chartCard"></div>
     </section>
 
-    <section>
+    <section id="systemsSection">
       <h2 class="section-title">The house, by system</h2>
-      <p class="section-desc">Next scheduled service for each part of the property.</p>
+      <p class="section-desc">Next scheduled service for each part of the property — click any card to open it.</p>
       <div class="systems-grid" id="systemsGrid"></div>
     </section>
 
@@ -150,6 +165,16 @@
       </div>
     </div>
   </aside>
+
+  <div class="overlay" id="promptOverlay"></div>
+  <div class="mini-modal" id="promptModal" aria-hidden="true">
+    <h3 id="promptTitle">Add</h3>
+    <input type="text" id="promptInput" />
+    <div class="mini-modal-actions">
+      <button class="btn" id="promptCancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="promptSave" type="button">Save</button>
+    </div>
+  </div>
 
   <div class="lightbox" id="lightbox" aria-hidden="true">
     <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Close photo">&times;</button>

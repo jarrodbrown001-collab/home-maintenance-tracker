@@ -3,7 +3,7 @@
 
   var STORAGE_KEY = "house-log-v1";
 
-  var SYSTEMS = [
+  var BUILTIN_SYSTEMS = [
     { id: "roof",       name: "Roof & Gutters",        icon: '<path d="M3 12 12 5l9 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 11v8h14v-8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' },
     { id: "hvac",       name: "HVAC",                  icon: '<circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v4.2M12 16.8V21M3 12h4.2M16.8 12H21M5.6 5.6l3 3M15.4 15.4l3 3M18.4 5.6l-3 3M8.6 15.4l-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
     { id: "plumbing",   name: "Plumbing & Water",      icon: '<path d="M12 4c2.6 3.4 5 6.4 5 9.2A5 5 0 0 1 7 13.2C7 10.4 9.4 7.4 12 4Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
@@ -14,26 +14,56 @@
     { id: "safety",     name: "Interior & Safety",     icon: '<circle cx="12" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 10a2.5 2.5 0 0 1 2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="10.3" y="16" width="3.4" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>' },
     { id: "grounds",    name: "Yard & Grounds",        icon: '<path d="M12 21c0-6 0-10.5 0-15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 9c0-3 2.4-5 5.5-5C17.5 7 15 9 12 9ZM12 13c0-2.6-2-4.4-4.8-4.4C7.2 11 9.4 13 12 13Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>' }
   ];
-  var SYS_BY_ID = {};
-  SYSTEMS.forEach(function (s) { SYS_BY_ID[s.id] = s; });
+  var CUSTOM_SYSTEM_ICON = '<circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v3M12 17.5v3M4.4 7.7l2.6 1.5M17 14.8l2.6 1.5M4.4 16.3l2.6-1.5M17 9.2l2.6-1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>';
 
   var TYPE_LABEL = { maintenance: "Maintenance", repair: "Repair", upgrade: "Upgrade", renovation: "Renovation" };
 
-  var state = { houseName: "", houseAddress: "", entries: [] };
+  var state = { activePropertyId: null, properties: [], lastExportAt: null, lastImport: null };
   var filters = { search: "", system: "", type: "", sort: "date-desc" };
   var editingId = null;
   var currentPhotoDataUrl = null;
   var toastTimer = null;
+  var currentSystemId = null;
+  var promptOnSave = null;
+
+  // ---------- active property + systems ----------
+  function activeProperty() {
+    var found = null;
+    state.properties.forEach(function (p) { if (p.id === state.activePropertyId) found = p; });
+    return found || state.properties[0];
+  }
+  function effectiveSystems() {
+    var custom = activeProperty().customSystems || [];
+    return BUILTIN_SYSTEMS.concat(custom.map(function (c) {
+      return { id: c.id, name: c.name, icon: CUSTOM_SYSTEM_ICON, custom: true };
+    }));
+  }
+  function sysById(id) {
+    var out = null;
+    effectiveSystems().forEach(function (s) { if (s.id === id) out = s; });
+    return out;
+  }
 
   // ---------- persistence ----------
   function load() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        var parsed = JSON.parse(raw);
-        state.houseName = parsed.houseName || "";
-        state.houseAddress = parsed.houseAddress || "";
-        state.entries = parsed.entries || [];
+      if (!raw) return false;
+      var parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.properties) && parsed.properties.length) {
+        state.properties = parsed.properties;
+        state.activePropertyId = parsed.activePropertyId && parsed.properties.some(function (p) { return p.id === parsed.activePropertyId; })
+          ? parsed.activePropertyId : parsed.properties[0].id;
+        state.lastExportAt = parsed.lastExportAt || null;
+        state.lastImport = parsed.lastImport || null;
+        return true;
+      }
+      if (parsed && Array.isArray(parsed.entries)) {
+        var p = { id: "p" + uid(), name: parsed.houseName || "", address: parsed.houseAddress || "", entries: parsed.entries, customSystems: [] };
+        state.properties = [p];
+        state.activePropertyId = p.id;
+        state.lastExportAt = null;
+        state.lastImport = null;
         return true;
       }
     } catch (e) {}
@@ -77,6 +107,11 @@
     var parts = iso.split("-").map(Number);
     var d = new Date(parts[0], parts[1] - 1, parts[2]);
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function fmtDateTime(stamp) {
+    var d = new Date(stamp);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) +
+      " · " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   }
   function fmtMoney(n) {
     if (n === null || n === undefined || isNaN(n)) return "—";
@@ -132,10 +167,11 @@
   }
 
   function loadSample() {
-    if (state.entries.length && !window.confirm("Replace the current log with the sample data? This can't be undone.")) return;
-    state.houseName = state.houseName || "142 Maple Ridge Road";
-    state.houseAddress = state.houseAddress || "Purchased 2019 · 2,150 sq ft";
-    state.entries = seedData();
+    var prop = activeProperty();
+    if (prop.entries.length && !window.confirm("Replace this property's log with sample data? This can't be undone.")) return;
+    prop.name = prop.name || "142 Maple Ridge Road";
+    prop.address = prop.address || "Purchased 2019 · 2,150 sq ft";
+    prop.entries = seedData();
     save();
     renderAll();
   }
@@ -152,7 +188,7 @@
 
   function latestPerTitleBySystem(systemId) {
     var groups = {};
-    state.entries.forEach(function (e) {
+    activeProperty().entries.forEach(function (e) {
       if (e.system !== systemId || !e.recurring) return;
       var key = e.title.trim().toLowerCase();
       if (!groups[key] || e.date > groups[key].date) groups[key] = e;
@@ -160,33 +196,141 @@
     return Object.keys(groups).map(function (k) { return groups[k]; });
   }
 
+  // ---------- routing ----------
+  function parseHash() {
+    var m = location.hash.match(/^#system\/(.+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function route() {
+    var wanted = parseHash();
+    var wasScoped = !!currentSystemId;
+    currentSystemId = (wanted && sysById(wanted)) ? wanted : null;
+    if (wasScoped && !currentSystemId) filters.system = "";
+    renderAll();
+  }
+  window.addEventListener("hashchange", route);
+
   // ---------- rendering ----------
   function renderAll() {
-    document.getElementById("houseName").value = state.houseName;
-    document.getElementById("houseAddr").value = state.houseAddress;
-    renderStats();
-    renderChart();
+    var prop = activeProperty();
+    document.getElementById("houseName").value = prop.name;
+    document.getElementById("houseAddr").value = prop.address;
+    renderPropertyTabs();
+    renderBackupStatus();
+
+    var scoped = !!currentSystemId;
+    document.getElementById("chartSection").classList.toggle("hidden", scoped);
+    document.getElementById("systemsSection").classList.toggle("hidden", scoped);
+    document.getElementById("systemBanner").classList.toggle("hidden", !scoped);
+    document.getElementById("fSystem").style.display = scoped ? "none" : "";
+    if (scoped) {
+      filters.system = currentSystemId;
+      renderSystemBanner();
+    }
+
+    renderStats(scoped ? currentSystemId : null);
+    if (!scoped) renderChart();
     renderSystems();
     renderFilterOptions();
     renderTable();
     renderPrintHeader();
   }
 
-  function renderPrintHeader() {
-    document.getElementById("printTitle").textContent = state.houseName || "House Log";
-    document.getElementById("printSub").textContent = state.houseAddress || "";
-    document.getElementById("printMeta").textContent =
-      "Printed " + fmtDate(todayISO()) + " · " + state.entries.length + " entries on record";
+  function renderPropertyTabs() {
+    var wrap = document.getElementById("propertyTabs");
+    var html = state.properties.map(function (p) {
+      var active = p.id === state.activePropertyId ? " active" : "";
+      var remove = state.properties.length > 1
+        ? '<span class="pt-remove" data-remove-property="' + p.id + '" title="Remove property">&times;</span>'
+        : "";
+      return '<button type="button" class="property-tab' + active + '" data-property="' + p.id + '">' +
+        '<span>' + escapeHtml(p.name || "Untitled property") + "</span>" + remove + "</button>";
+    }).join("") + '<button type="button" class="property-tab add" id="addPropertyBtn">+ Property</button>';
+    wrap.innerHTML = html;
+
+    wrap.querySelectorAll("[data-property]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        if (e.target.closest("[data-remove-property]")) return;
+        var id = btn.getAttribute("data-property");
+        if (id === state.activePropertyId) return;
+        state.activePropertyId = id;
+        location.hash = "";
+        save();
+        renderAll();
+      });
+    });
+    wrap.querySelectorAll("[data-remove-property]").forEach(function (x) {
+      x.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var id = x.getAttribute("data-remove-property");
+        var p = null;
+        state.properties.forEach(function (pp) { if (pp.id === id) p = pp; });
+        if (!p) return;
+        if (!window.confirm('Remove "' + (p.name || "this property") + '" and all ' + p.entries.length + " logged entries? This can't be undone.")) return;
+        state.properties = state.properties.filter(function (pp) { return pp.id !== id; });
+        if (state.activePropertyId === id) state.activePropertyId = state.properties[0].id;
+        location.hash = "";
+        save();
+        renderAll();
+      });
+    });
+    document.getElementById("addPropertyBtn").addEventListener("click", function () {
+      openPrompt("Add a property", "e.g. Lake house", "", function (name) {
+        var p = { id: "p" + uid(), name: name, address: "", entries: [], customSystems: [] };
+        state.properties.push(p);
+        state.activePropertyId = p.id;
+        location.hash = "";
+        save();
+        renderAll();
+      });
+    });
   }
 
-  function renderStats() {
-    var overdue = 0, soon = 0, ytdSpend = 0, total = state.entries.length;
+  function renderBackupStatus() {
+    var el = document.getElementById("backupStatus");
+    var parts = [];
+    parts.push(state.lastExportAt
+      ? '<span class="status-chip">Last export ' + fmtDateTime(state.lastExportAt) + "</span>"
+      : '<span class="status-chip warn">Not backed up yet — export a copy</span>');
+    if (state.lastImport) {
+      parts.push('<span class="status-chip">Imported "' + escapeHtml(state.lastImport.name) + '" · ' + fmtDateTime(state.lastImport.at) + "</span>");
+    }
+    el.innerHTML = parts.join("");
+  }
+
+  function renderSystemBanner() {
+    var s = sysById(currentSystemId);
+    if (!s) { location.hash = ""; return; }
+    document.getElementById("bannerIcon").innerHTML = '<svg viewBox="0 0 24 24">' + s.icon + "</svg>";
+    document.getElementById("bannerName").textContent = s.name;
+    var count = activeProperty().entries.filter(function (e) { return e.system === currentSystemId; }).length;
+    document.getElementById("bannerSub").textContent = count + (count === 1 ? " entry logged in this system" : " entries logged in this system");
+  }
+
+  function renderPrintHeader() {
+    var prop = activeProperty();
+    document.getElementById("printTitle").textContent = prop.name || "House Log";
+    var sub = prop.address || "";
+    if (currentSystemId) {
+      var s = sysById(currentSystemId);
+      sub = (sub ? sub + " · " : "") + (s ? s.name : "") + " system";
+    }
+    document.getElementById("printSub").textContent = sub;
+    var count = currentSystemId ? activeProperty().entries.filter(function (e) { return e.system === currentSystemId; }).length : prop.entries.length;
+    document.getElementById("printMeta").textContent = "Printed " + fmtDate(todayISO()) + " · " + count + " entries on record";
+  }
+
+  function renderStats(scopeSystemId) {
+    var prop = activeProperty();
+    var relevant = scopeSystemId ? prop.entries.filter(function (e) { return e.system === scopeSystemId; }) : prop.entries;
+    var overdue = 0, soon = 0, ytdSpend = 0, total = relevant.length;
     var yearNow = new Date().getFullYear();
-    state.entries.forEach(function (e) {
+    relevant.forEach(function (e) {
       if (new Date(e.date + "T00:00:00").getFullYear() === yearNow) ytdSpend += Number(e.cost) || 0;
     });
-    SYSTEMS.forEach(function (s) {
-      latestPerTitleBySystem(s.id).forEach(function (e) {
+    var systemIds = scopeSystemId ? [scopeSystemId] : effectiveSystems().map(function (s) { return s.id; });
+    systemIds.forEach(function (sid) {
+      latestPerTitleBySystem(sid).forEach(function (e) {
         var c = withComputed(e);
         if (c.status === "overdue") overdue++;
         else if (c.status === "soon") soon++;
@@ -209,11 +353,11 @@
   function renderChart() {
     var yearNow = new Date().getFullYear();
     var totals = {};
-    state.entries.forEach(function (e) {
+    activeProperty().entries.forEach(function (e) {
       if (new Date(e.date + "T00:00:00").getFullYear() !== yearNow) return;
       totals[e.system] = (totals[e.system] || 0) + (Number(e.cost) || 0);
     });
-    var rows = SYSTEMS.map(function (s) { return { name: s.name, val: totals[s.id] || 0 }; })
+    var rows = effectiveSystems().map(function (s) { return { name: s.name, val: totals[s.id] || 0 }; })
       .filter(function (r) { return r.val > 0; })
       .sort(function (a, b) { return b.val - a.val; });
 
@@ -234,7 +378,8 @@
   }
 
   function renderSystems() {
-    var html = SYSTEMS.map(function (s) {
+    var systems = effectiveSystems();
+    var html = systems.map(function (s) {
       var actives = latestPerTitleBySystem(s.id).map(withComputed).sort(function (a, b) {
         return a.entry.nextDue < b.entry.nextDue ? -1 : 1;
       });
@@ -253,16 +398,25 @@
         dueHtml = "";
       }
       var extra = actives.length > 1 ? '<span class="track-count">+' + (actives.length - 1) + ' more tracked</span>' : '<span class="track-count"></span>';
-      return '<div class="system-card">' +
-        '<div class="head"><svg viewBox="0 0 24 24">' + s.icon + '</svg><span class="sys-name">' + s.name + '</span>' + pillHtml + '</div>' +
+      return '<div class="system-card" data-system-nav="' + s.id + '">' +
+        '<div class="head"><svg viewBox="0 0 24 24">' + s.icon + '</svg><span class="sys-name">' + escapeHtml(s.name) + '</span>' + pillHtml + '</div>' +
         '<div class="next-item">' + itemHtml + dueHtml + '</div>' +
-        '<div class="foot">' + extra + '<button class="link-btn" data-quick-system="' + s.id + '" data-quick-title="' + (top ? top.entry.title.replace(/"/g, "&quot;") : "") + '" data-quick-interval="' + (top ? top.entry.intervalMonths : "") + '">Log service &rarr;</button></div>' +
+        '<div class="foot">' + extra + '<button type="button" class="link-btn" data-quick-system="' + s.id + '" data-quick-title="' + (top ? top.entry.title.replace(/"/g, "&quot;") : "") + '" data-quick-interval="' + (top ? top.entry.intervalMonths : "") + '">Log service &rarr;</button></div>' +
         '</div>';
-    }).join("");
-    document.getElementById("systemsGrid").innerHTML = html;
+    }).join("") + '<button type="button" class="system-card add-system-tile" id="addSystemTile"><span class="add-plus">+</span><span>Add a system</span></button>';
 
-    document.querySelectorAll("[data-quick-system]").forEach(function (btn) {
-      btn.addEventListener("click", function () {
+    var grid = document.getElementById("systemsGrid");
+    grid.innerHTML = html;
+
+    grid.querySelectorAll(".system-card[data-system-nav]").forEach(function (card) {
+      card.addEventListener("click", function (e) {
+        if (e.target.closest(".link-btn")) return;
+        location.hash = "#system/" + encodeURIComponent(card.getAttribute("data-system-nav"));
+      });
+    });
+    grid.querySelectorAll("[data-quick-system]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
         openPanel(null, {
           system: btn.getAttribute("data-quick-system"),
           title: btn.getAttribute("data-quick-title") || "",
@@ -270,29 +424,33 @@
         });
       });
     });
+    document.getElementById("addSystemTile").addEventListener("click", function () {
+      openPrompt("Add a system", "e.g. Pool & Spa, Septic, Solar", "", function (name) {
+        var id = "custom-" + uid();
+        activeProperty().customSystems.push({ id: id, name: name });
+        save();
+        renderAll();
+      });
+    });
   }
 
   function renderFilterOptions() {
+    var systems = effectiveSystems();
     var sel = document.getElementById("fSystem");
-    if (sel.options.length <= 1) {
-      SYSTEMS.forEach(function (s) {
-        var o = document.createElement("option");
-        o.value = s.id; o.textContent = s.name;
-        sel.appendChild(o);
-      });
-    }
+    sel.innerHTML = '<option value="">All systems</option>' + systems.map(function (s) {
+      return '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>';
+    }).join("");
+    if (filters.system && !systems.some(function (s) { return s.id === filters.system; })) filters.system = "";
+    sel.value = filters.system;
+
     var fldSystem = document.getElementById("fldSystem");
-    if (fldSystem.options.length === 0) {
-      SYSTEMS.forEach(function (s) {
-        var o = document.createElement("option");
-        o.value = s.id; o.textContent = s.name;
-        fldSystem.appendChild(o);
-      });
-    }
+    var prevFld = fldSystem.value;
+    fldSystem.innerHTML = systems.map(function (s) { return '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>'; }).join("");
+    if (systems.some(function (s) { return s.id === prevFld; })) fldSystem.value = prevFld;
   }
 
   function renderTable() {
-    var rows = state.entries.slice();
+    var rows = activeProperty().entries.slice();
     var q = filters.search.trim().toLowerCase();
     if (q) rows = rows.filter(function (e) { return (e.title + " " + e.notes).toLowerCase().indexOf(q) !== -1; });
     if (filters.system) rows = rows.filter(function (e) { return e.system === filters.system; });
@@ -313,7 +471,7 @@
       return;
     }
     body.innerHTML = rows.map(function (e) {
-      var sys = SYS_BY_ID[e.system];
+      var sys = sysById(e.system);
       var recur = e.recurring ? ('every ' + e.intervalMonths + ' mo · next ' + fmtDateShort(e.nextDue)) : "—";
       var photoChip = e.photo
         ? '<button type="button" class="photo-chip" data-photo="' + e.id + '" aria-label="View attached photo">' +
@@ -322,7 +480,7 @@
         : '';
       return '<tr>' +
         '<td class="col-date">' + fmtDate(e.date) + '</td>' +
-        '<td>' + (sys ? sys.name : e.system) + '</td>' +
+        '<td>' + (sys ? escapeHtml(sys.name) : e.system) + '</td>' +
         '<td><div class="item-title-row"><span class="item-title">' + escapeHtml(e.title) + '</span>' + photoChip + '</div>' +
           '<span class="type-chip">' + TYPE_LABEL[e.type] + '</span>' +
           (e.notes ? '<div class="item-notes">' + escapeHtml(e.notes) + '</div>' : '') + '</td>' +
@@ -342,7 +500,8 @@
     });
     body.querySelectorAll("[data-photo]").forEach(function (b) {
       b.addEventListener("click", function () {
-        var e = state.entries.find(function (x) { return x.id === b.getAttribute("data-photo"); });
+        var e = null;
+        activeProperty().entries.forEach(function (x) { if (x.id === b.getAttribute("data-photo")) e = x; });
         if (e && e.photo) openLightbox(e.photo);
       });
     });
@@ -350,15 +509,18 @@
 
   // ---------- delete with undo ----------
   function deleteEntry(id) {
-    var idx = state.entries.findIndex(function (x) { return x.id === id; });
+    var prop = activeProperty();
+    var entries = prop.entries;
+    var idx = -1;
+    entries.forEach(function (x, i) { if (x.id === id) idx = i; });
     if (idx === -1) return;
-    var removed = state.entries[idx];
+    var removed = entries[idx];
     var atIndex = idx;
-    state.entries.splice(idx, 1);
+    entries.splice(idx, 1);
     save();
     renderAll();
     showUndoToast('Deleted "' + removed.title + '"', function () {
-      state.entries.splice(atIndex, 0, removed);
+      prop.entries.splice(atIndex, 0, removed);
       save();
       renderAll();
     });
@@ -396,7 +558,8 @@
     document.getElementById("fldPhoto").value = "";
 
     if (editingId) {
-      var e = state.entries.find(function (x) { return x.id === editingId; });
+      var e = null;
+      activeProperty().entries.forEach(function (x) { if (x.id === editingId) e = x; });
       document.getElementById("fldTitle").value = e.title;
       document.getElementById("fldSystem").value = e.system;
       document.getElementById("fldType").value = e.type;
@@ -407,8 +570,9 @@
       document.getElementById("fldInterval").value = e.intervalMonths || "";
       currentPhotoDataUrl = e.photo || null;
     } else {
+      var defaultSystem = (prefill && prefill.system) ? prefill.system : (currentSystemId || effectiveSystems()[0].id);
       document.getElementById("fldTitle").value = prefill && prefill.title ? prefill.title : "";
-      document.getElementById("fldSystem").value = prefill && prefill.system ? prefill.system : SYSTEMS[0].id;
+      document.getElementById("fldSystem").value = defaultSystem;
       document.getElementById("fldType").value = "maintenance";
       document.getElementById("fldDate").value = todayISO();
       document.getElementById("fldCost").value = "";
@@ -497,14 +661,52 @@
   document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
   lightbox.addEventListener("click", function (e) { if (e.target === lightbox) closeLightbox(); });
 
+  // ---------- generic prompt modal (add property / add system) ----------
+  var promptOverlay = document.getElementById("promptOverlay");
+  var promptModal = document.getElementById("promptModal");
+  function openPrompt(title, placeholder, defaultValue, onSave) {
+    document.getElementById("promptTitle").textContent = title;
+    var input = document.getElementById("promptInput");
+    input.placeholder = placeholder || "";
+    input.value = defaultValue || "";
+    promptOnSave = onSave;
+    promptOverlay.classList.add("open");
+    promptModal.classList.add("open");
+    promptModal.setAttribute("aria-hidden", "false");
+    setTimeout(function () { input.focus(); }, 50);
+  }
+  function closePrompt() {
+    promptOverlay.classList.remove("open");
+    promptModal.classList.remove("open");
+    promptModal.setAttribute("aria-hidden", "true");
+    promptOnSave = null;
+  }
+  function submitPrompt() {
+    var val = document.getElementById("promptInput").value.trim();
+    if (!val) return;
+    var cb = promptOnSave;
+    closePrompt();
+    if (cb) cb(val);
+  }
+  document.getElementById("promptSave").addEventListener("click", submitPrompt);
+  document.getElementById("promptCancel").addEventListener("click", closePrompt);
+  promptOverlay.addEventListener("click", closePrompt);
+  document.getElementById("promptInput").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") submitPrompt();
+  });
+
   document.getElementById("fldType").addEventListener("change", syncRecurVisibility);
-  document.getElementById("newEntryBtn").addEventListener("click", function () { openPanel(null); });
+  document.getElementById("newEntryBtn").addEventListener("click", function () {
+    openPanel(null, currentSystemId ? { system: currentSystemId } : null);
+  });
+  document.getElementById("backToOverview").addEventListener("click", function () { location.hash = ""; });
   document.getElementById("panelClose").addEventListener("click", closePanel);
   document.getElementById("cancelBtn").addEventListener("click", closePanel);
   overlay.addEventListener("click", closePanel);
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Escape") return;
     if (lightbox.classList.contains("open")) closeLightbox();
+    else if (promptModal.classList.contains("open")) closePrompt();
     else if (panel.classList.contains("open")) closePanel();
   });
 
@@ -531,12 +733,14 @@
     };
     payload.nextDue = recurring ? addMonths(date, interval) : null;
 
+    var entries = activeProperty().entries;
     if (editingId) {
-      var idx = state.entries.findIndex(function (x) { return x.id === editingId; });
-      state.entries[idx] = Object.assign({ id: editingId }, payload);
+      var idx = -1;
+      entries.forEach(function (x, i) { if (x.id === editingId) idx = i; });
+      entries[idx] = Object.assign({ id: editingId }, payload);
     } else {
       payload.id = uid();
-      state.entries.unshift(payload);
+      entries.unshift(payload);
     }
     save();
     closePanel();
@@ -551,15 +755,22 @@
   });
 
   // ---------- header + filters wiring ----------
-  document.getElementById("houseName").addEventListener("input", function (e) { state.houseName = e.target.value; save(); });
-  document.getElementById("houseAddr").addEventListener("input", function (e) { state.houseAddress = e.target.value; save(); });
+  document.getElementById("houseName").addEventListener("input", function (e) {
+    activeProperty().name = e.target.value;
+    save();
+    renderPropertyTabs();
+  });
+  document.getElementById("houseAddr").addEventListener("input", function (e) { activeProperty().address = e.target.value; save(); });
   document.getElementById("resetBtn").addEventListener("click", loadSample);
   document.getElementById("printBtn").addEventListener("click", function () { window.print(); });
 
   document.getElementById("exportBtn").addEventListener("click", function () {
+    state.lastExportAt = new Date().toISOString();
+    save();
+    renderBackupStatus();
     var blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     var url = URL.createObjectURL(blob);
-    var base = (state.houseName || "house-log").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "house-log";
+    var base = (activeProperty().name || "house-log").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "house-log";
     var a = document.createElement("a");
     a.href = url;
     a.download = base + "-backup-" + todayISO() + ".json";
@@ -577,19 +788,31 @@
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function (ev) {
-      var parsed;
+      var parsed, incoming;
       try {
         parsed = JSON.parse(ev.target.result);
-        if (!parsed || !Array.isArray(parsed.entries)) throw new Error("bad shape");
+        if (parsed && Array.isArray(parsed.properties) && parsed.properties.length) {
+          incoming = { properties: parsed.properties, activePropertyId: parsed.activePropertyId, lastExportAt: parsed.lastExportAt || null };
+        } else if (parsed && Array.isArray(parsed.entries)) {
+          var p = { id: "p" + uid(), name: parsed.houseName || "Imported property", address: parsed.houseAddress || "", entries: parsed.entries, customSystems: [] };
+          incoming = { properties: [p], activePropertyId: p.id, lastExportAt: null };
+        } else {
+          throw new Error("bad shape");
+        }
       } catch (err) {
         window.alert("That file doesn't look like a House Log backup.");
         return;
       }
-      var msg = "Import will replace the current log (" + state.entries.length + " entries) with this backup (" + parsed.entries.length + " entries). Continue?";
+      var entryTotal = incoming.properties.reduce(function (sum, p) { return sum + (p.entries ? p.entries.length : 0); }, 0);
+      var msg = "Import will replace everything currently stored (" + state.properties.length + " propert" + (state.properties.length === 1 ? "y" : "ies") +
+        ") with this backup (" + incoming.properties.length + " propert" + (incoming.properties.length === 1 ? "y" : "ies") + ", " + entryTotal + " entries). Continue?";
       if (!window.confirm(msg)) return;
-      state.houseName = parsed.houseName || "";
-      state.houseAddress = parsed.houseAddress || "";
-      state.entries = parsed.entries;
+      state.properties = incoming.properties;
+      state.activePropertyId = incoming.properties.some(function (p) { return p.id === incoming.activePropertyId; })
+        ? incoming.activePropertyId : incoming.properties[0].id;
+      state.lastExportAt = incoming.lastExportAt;
+      state.lastImport = { name: file.name, at: new Date().toISOString() };
+      location.hash = "";
       save();
       renderAll();
     };
@@ -604,10 +827,10 @@
   // ---------- boot ----------
   var hadData = load();
   if (!hadData) {
-    state.houseName = "142 Maple Ridge Road";
-    state.houseAddress = "Purchased 2019 · 2,150 sq ft";
-    state.entries = seedData();
+    var seedProp = { id: "p" + uid(), name: "142 Maple Ridge Road", address: "Purchased 2019 · 2,150 sq ft", entries: seedData(), customSystems: [] };
+    state.properties = [seedProp];
+    state.activePropertyId = seedProp.id;
     save();
   }
-  renderAll();
+  route();
 })();
